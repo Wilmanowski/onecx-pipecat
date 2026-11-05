@@ -5,14 +5,19 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from pipecat.frames.frames import (
+    CancelFrame,
     CancelWorkerFrame,
     Frame,
     InputTransportMessageFrame,
-    OutputTransportMessageFrame,
+    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     OutputTransportMessageUrgentFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from onecx_pipecat.pipeline.captions import CaptionMessageFrame
 from onecx_pipecat.pipeline.serializer import BAD_COMMAND, wire_event
 from onecx_pipecat.protocol import (
     Command,
@@ -24,13 +29,6 @@ from onecx_pipecat.protocol import (
 )
 
 Emit = Callable[[Event], Awaitable[None]]
-
-
-def message_frame(event: Event, *, urgent: bool) -> Frame:
-    message = event.model_dump()
-    if urgent:
-        return OutputTransportMessageUrgentFrame(message=message)
-    return OutputTransportMessageFrame(message=message)
 
 
 class SessionControl(FrameProcessor):
@@ -66,28 +64,37 @@ class WireEvents(FrameProcessor):
     """Mirrors client-visible frames as transport messages, then passes the frame on.
 
     The output transport only serializes interruptions, transport messages and
-    audio, so frames like transcripts, spoken text and bot speaking state need
-    an explicit transport message. ``ordered`` messages travel in sequence with
-    the audio; ``urgent`` ones are sent immediately.
+    audio, so frames like transcripts, captions and bot speaking state need an
+    explicit transport message. It is urgent: sent immediately, not queued
+    behind the audio that the output transport paces in real time.
     """
 
-    def __init__(
-        self,
-        *,
-        urgent: tuple[type[Frame], ...] = (),
-        ordered: tuple[type[Frame], ...] = (),
-        **kwargs,
-    ) -> None:
+    def __init__(self, *, urgent: tuple[type[Frame], ...], **kwargs) -> None:
         super().__init__(name="WireEvents", **kwargs)
         self._urgent = urgent
-        self._ordered = ordered
+        self._response_active = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        is_urgent = isinstance(frame, self._urgent)
-        if is_urgent or (
-            isinstance(frame, self._ordered) and direction is FrameDirection.DOWNSTREAM
+        if direction is FrameDirection.DOWNSTREAM and isinstance(frame, LLMFullResponseStartFrame):
+            self._response_active = True
+        elif direction is FrameDirection.DOWNSTREAM and isinstance(
+            frame, InterruptionFrame | CancelFrame | CancelWorkerFrame
         ):
-            if (event := wire_event(frame)) is not None:
-                await self.push_frame(message_frame(event, urgent=is_urgent))
+            self._response_active = False
+        eligible = not isinstance(frame, TTSTextFrame) or self._response_active
+        if (
+            eligible
+            and isinstance(frame, self._urgent)
+            and (event := wire_event(frame)) is not None
+        ):
+            message = event.model_dump()
+            if isinstance(frame, TTSTextFrame):
+                await self.push_frame(
+                    CaptionMessageFrame(message=message, context_id=frame.context_id)
+                )
+            else:
+                await self.push_frame(OutputTransportMessageUrgentFrame(message=message))
         await self.push_frame(frame, direction)
+        if direction is FrameDirection.DOWNSTREAM and isinstance(frame, LLMFullResponseEndFrame):
+            self._response_active = False

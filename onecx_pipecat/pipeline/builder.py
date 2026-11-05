@@ -1,7 +1,13 @@
 """Assembles the long-lived Pipecat pipeline of one voice session.
 
-``transport.input() -> control -> stt -> transcripts -> user aggregator -> llm
--> tts -> wire events -> transport.output() -> assistant aggregator``
+``transport.input() -> control -> stt -> transcripts -> user aggregator
+-> context sync -> llm -> context sync -> tts -> wire events
+-> transport.output() -> captions settled -> assistant aggregator``
+
+Captions (``assistant_text``) are sent after sentence synthesis completes and
+urgently, independently of audio playback, which the output transport paces in
+real time. The transport records successful caption writes and snapshots
+pending captions when it processes an interruption.
 
 Turn boundaries come either from a VAD analyzer in the user aggregator
 (``speech.turn_detection=vad``: the user turn starts on speech and ends after a
@@ -46,6 +52,11 @@ from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies, UserT
 
 from onecx_pipecat.config import Settings
 from onecx_pipecat.models import VoiceEntry
+from onecx_pipecat.pipeline.captions import (
+    CaptionLedger,
+    CaptionWebsocketOutputTransport,
+    install_caption_transport,
+)
 from onecx_pipecat.pipeline.persistence import attach_persistence
 from onecx_pipecat.pipeline.processors import SessionControl, WireEvents
 from onecx_pipecat.pipeline.serializer import OnecxFrameSerializer
@@ -71,6 +82,7 @@ def build_voice_pipeline(
     history: list[dict[str, str]],
     save_entry: Callable[[VoiceEntry], Awaitable[str]],
     dispatch: Callable[[Command], Awaitable[list[Event]]],
+    fatal_context_failure: Callable[[Exception], Awaitable[None]],
     vad_analyzer: VADAnalyzer | None = None,
 ) -> PipelineWorker:
     sample_rate = settings.speech.sample_rate_hz
@@ -96,7 +108,18 @@ def build_voice_pipeline(
     )
     aggregators = LLMContextAggregatorPair(context, user_params=_user_params(vad_analyzer))
     user, assistant = aggregators.user(), aggregators.assistant()
-    attach_persistence(user, assistant, save_entry, emit)
+    captions = CaptionLedger()
+    install_caption_transport(transport, captions)
+    assert isinstance(transport.output(), CaptionWebsocketOutputTransport)
+    context_in, context_out = attach_persistence(
+        user,
+        assistant,
+        save_entry,
+        emit,
+        captions=captions,
+        context=context,
+        fatal_context_failure=fatal_context_failure,
+    )
 
     pipeline = Pipeline(
         [
@@ -105,7 +128,9 @@ def build_voice_pipeline(
             stt,
             WireEvents(urgent=(InterimTranscriptionFrame, TranscriptionFrame)),
             user,
+            context_in,
             llm,
+            context_out,
             tts,
             WireEvents(
                 urgent=(
@@ -113,10 +138,11 @@ def build_voice_pipeline(
                     BotStoppedSpeakingFrame,
                     UserStartedSpeakingFrame,
                     UserStoppedSpeakingFrame,
+                    TTSTextFrame,
                 ),
-                ordered=(TTSTextFrame,),
             ),
             transport.output(),
+            captions.settled,
             assistant,
         ]
     )
