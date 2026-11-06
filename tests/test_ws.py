@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocketDisconnect
 
 from onecx_pipecat.app import create_app
+from onecx_pipecat.config import Settings, VoiceSettings
 from onecx_pipecat.container import AppContainer
 from tests.fakes import FakePersistence, fake_container
 from tests.voice_helpers import (
@@ -155,3 +156,98 @@ def test_ws_idle_session_is_ended_at_token_expiry():
         with pytest.raises(WebSocketDisconnect) as closed:
             _receive_json_bounded(ws)
         assert closed.value.code == 1008
+
+
+def _same_host_container() -> AppContainer:
+    container = _container()
+    container.settings = Settings(
+        llm=container.settings.llm,
+        speech=container.settings.speech,
+        voice=VoiceSettings(origin_policy="same-host"),
+    )
+    return container
+
+
+def _off_container() -> AppContainer:
+    container = _container()
+    container.settings = Settings(
+        llm=container.settings.llm,
+        speech=container.settings.speech,
+        voice=VoiceSettings(origin_policy="off"),
+    )
+    return container
+
+
+def test_ws_deny_policy_rejects_even_a_same_host_origin():
+    # Default policy is ``deny``: every connection is rejected before a session
+    # is created, regardless of the Origin header.
+    container = _container()
+    container.settings.voice.origin_policy = "deny"
+    client = TestClient(create_app(container))
+    with client.websocket_connect("/ws/voice", headers={"origin": "http://testserver"}) as ws:
+        with pytest.raises(WebSocketDisconnect) as closed:
+            _receive_json_bounded(ws)
+        assert closed.value.code == 1008
+        assert closed.value.reason == "origin_not_allowed"
+
+
+def test_ws_same_host_allows_matching_origin():
+    client = TestClient(create_app(_same_host_container()))
+    with client.websocket_connect("/ws/voice", headers={"origin": "http://testserver"}) as ws:
+        ws.send_json(_start())
+        assert _receive_json_bounded(ws)["kind"] == "session_ready"
+        end_session(ws)
+
+
+def test_ws_same_host_allows_matching_origin_with_a_different_port():
+    # The comparison is hostname-only: scheme and port are ignored.
+    client = TestClient(create_app(_same_host_container()))
+    with client.websocket_connect("/ws/voice", headers={"origin": "https://testserver:443"}) as ws:
+        ws.send_json(_start())
+        assert _receive_json_bounded(ws)["kind"] == "session_ready"
+        end_session(ws)
+
+
+def test_ws_same_host_rejects_a_foreign_origin():
+    client = TestClient(create_app(_same_host_container()))
+    with client.websocket_connect("/ws/voice", headers={"origin": "https://evil.example"}) as ws:
+        with pytest.raises(WebSocketDisconnect) as closed:
+            _receive_json_bounded(ws)
+        assert closed.value.code == 1008
+        assert closed.value.reason == "origin_not_allowed"
+
+
+def test_ws_same_host_rejects_a_missing_origin():
+    client = TestClient(create_app(_same_host_container()))
+    with client.websocket_connect("/ws/voice") as ws:
+        with pytest.raises(WebSocketDisconnect) as closed:
+            _receive_json_bounded(ws)
+        assert closed.value.code == 1008
+        assert closed.value.reason == "origin_not_allowed"
+
+
+def test_ws_same_host_rejects_a_null_origin():
+    client = TestClient(create_app(_same_host_container()))
+    with client.websocket_connect("/ws/voice", headers={"origin": "null"}) as ws:
+        with pytest.raises(WebSocketDisconnect) as closed:
+            _receive_json_bounded(ws)
+        assert closed.value.code == 1008
+        assert closed.value.reason == "origin_not_allowed"
+
+
+def test_ws_off_policy_allows_any_origin():
+    # ``off`` skips the check: a foreign origin still opens a session. Intended
+    # for tests and local development only.
+    client = TestClient(create_app(_off_container()))
+    with client.websocket_connect("/ws/voice", headers={"origin": "https://evil.example"}) as ws:
+        ws.send_json(_start())
+        assert _receive_json_bounded(ws)["kind"] == "session_ready"
+        end_session(ws)
+
+
+def test_ws_off_policy_allows_a_missing_origin():
+    client = TestClient(create_app(_off_container()))
+    with client.websocket_connect("/ws/voice") as ws:
+        ws.send_json(_start())
+        assert _receive_json_bounded(ws)["kind"] == "session_ready"
+        end_session(ws)
