@@ -39,6 +39,8 @@ def compose_system_prompt(
     blocks: list[str] = []
     if snapshot.system_prompt.strip():
         blocks.append(snapshot.system_prompt.strip())
+    if snapshot.additional_prompt.strip():
+        blocks.append(snapshot.additional_prompt.strip())
     skills = usable_skills(snapshot)
     if skills:
         lines = [f"- {s.name}: {s.description or s.name}" for s in skills]

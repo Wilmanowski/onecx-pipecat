@@ -56,8 +56,12 @@ for the lifetime of the session. `HttpAgentConfigAdapter` calls
 onecx-ai-provider-svc
 `GET {agent_config.base_url}/v1/agents/{id}/configuration` with the
 `apm-principal-token` header and parses the `AgentConfiguration` payload:
-`schemaVersion`, `agent.id`, `scaffold.systemPrompt`, and `mcpServers[]`
-(`name`, `url`, `credentialRef`, `unlistedToolPermission`, `toolRules[]`).
+`schemaVersion`, `agent.id`, optional `agent.additionalPrompt`,
+`scaffold.systemPrompt`, and `mcpServers[]` (`name`, `url`, `credentialRef`,
+`unlistedToolPermission`, `toolRules[]`). The additional prompt defaults to an
+empty string when omitted or null. Prompt composition places its trimmed text
+after `scaffold.systemPrompt`, followed by available skills and then session
+AI context.
 It fails closed with `AgentConfigError` on `404`, `409`, any other error
 status, an unreachable endpoint, an MCP server without `name`/`url`, or when
 `voice.voiceEnabled` is not `true`.
