@@ -127,6 +127,7 @@ def _parse_configuration(body: Any, agent_id: str) -> AgentConfigSnapshot:
         agent_name=str(agent.get("name") or ""),
         schema_version=str(body.get("schemaVersion", "")),
         system_prompt=str(scaffold.get("systemPrompt") or ""),
+        additional_prompt=str(agent.get("additionalPrompt") or ""),
         provider=provider,
         model=model,
         skills=skills,

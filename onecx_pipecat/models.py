@@ -97,6 +97,7 @@ class AgentConfigSnapshot(BaseModel):
     agent_id: str
     schema_version: str
     system_prompt: str = ""
+    additional_prompt: str = ""
     mcp_servers: list[McpServerSnapshot] = Field(default_factory=list)
     # Pinned voice language (``voice.languageCode``); "" when the configuration
     # does not specify one, so speech falls back to the configured default.

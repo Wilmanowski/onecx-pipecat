@@ -322,7 +322,11 @@ async def test_jwt_auth_falls_back_to_first_key_without_kid():
 _AGENT_CONFIGURATION = {
     "schemaVersion": "1",
     "context": {"tenantId": "local", "principal": "user-1"},
-    "agent": {"id": "agent-1", "name": "Helper"},
+    "agent": {
+        "id": "agent-1",
+        "name": "Helper",
+        "additionalPrompt": "  Ask for tenant first.  ",
+    },
     "voice": {"voiceEnabled": True, "languageCode": "en"},
     "scaffold": {"id": "s1", "name": "default", "systemPrompt": "be brief"},
     "provider": {
@@ -392,6 +396,7 @@ async def test_agent_config_parses_ai_provider_configuration():
     assert snap.agent_id == "agent-1"
     assert snap.schema_version == "1"
     assert snap.system_prompt == "be brief"
+    assert snap.additional_prompt == "  Ask for tenant first.  "
     assert snap.agent_name == "Helper"
     assert snap.provider.type == "OPENAI"
     assert snap.provider.llm_url == "https://llm.example/v1"
@@ -409,6 +414,14 @@ async def test_agent_config_parses_ai_provider_configuration():
     assert server.tool_rules == [
         ToolRule(tool_name="read", permission=PermissionAction.ALWAYS_ALLOW, description="Read CRM")
     ]
+
+
+async def test_agent_config_without_additional_prompt_defaults_empty():
+    body = {**_AGENT_CONFIGURATION, "agent": {"id": "agent-1", "name": "Helper"}}
+
+    snap = await _pin(200, body)
+
+    assert snap.additional_prompt == ""
 
 
 @pytest.mark.parametrize("voice", [{"voiceEnabled": False}, {}, None])
