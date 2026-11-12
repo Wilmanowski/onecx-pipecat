@@ -44,12 +44,13 @@
 - Modify: `../onecx-ai-provider-svc/src/main/openapi/onecx-ai-v1.yaml`
 - Modify: `../onecx-ai-provider-svc/src/main/java/org/tkit/onecx/ai/provider/rs/external/v1/mappers/AgentConfigurationMapper.java`
 - Test: `../onecx-ai-provider-svc/src/test/java/org/tkit/onecx/ai/provider/rs/external/v1/mappers/AgentConfigurationMapperTest.java`
+- Test: `../onecx-ai-provider-svc/src/test/java/org/tkit/onecx/ai/provider/rs/external/v1/controllers/AgentRestV1ControllerTest.java`
 
 **Interfaces:**
 - Consumes: `Agent.additionalPrompt` (optional persisted string).
 - Produces: `AgentConfiguration.agent.additionalPrompt` (optional string in the `GET /v1/agents/{id}/configuration` response).
 
-- [ ] **Step 1: Add a failing mapper assertion**
+- [ ] **Step 1: Add failing mapper and endpoint assertions**
 
 In `AgentConfigurationMapperTest.build_mapsTopLevelFields`, set
 `agent.setAdditionalPrompt("Ask for tenant first.")` before calling
@@ -59,15 +60,24 @@ In `AgentConfigurationMapperTest.build_mapsTopLevelFields`, set
 assertThat(config.getAgent().getAdditionalPrompt()).isEqualTo("Ask for tenant first.");
 ```
 
-- [ ] **Step 2: Run the focused mapper test and confirm it fails**
+In `AgentRestV1ControllerTest.getAgentConfiguration_resolvesSecretFreeConfiguration`,
+assert the existing fixture's configured prompt is present in the endpoint
+response:
+
+```java
+assertThat(config.getAgent().getAdditionalPrompt()).isEqualTo("agent_additional_prompt_1");
+```
+
+- [ ] **Step 2: Run focused service tests and confirm they fail**
 
 Run from `../onecx-ai-provider-svc`:
 
 ```bash
-mvn -Dtest=AgentConfigurationMapperTest test
+mvn -Dtest=AgentConfigurationMapperTest,AgentRestV1ControllerTest test
 ```
 
-Expected: the response DTO does not yet expose the `additionalPrompt` getter/property.
+Expected: compilation fails because the generated response DTO does not yet
+expose the `additionalPrompt` getter/property.
 
 - [ ] **Step 3: Add the optional response property and mapping**
 
@@ -94,11 +104,11 @@ required.
 Run:
 
 ```bash
-mvn -Dtest=AgentConfigurationMapperTest test
+mvn -Dtest=AgentConfigurationMapperTest,AgentRestV1ControllerTest test
 ```
 
-Expected: `AgentConfigurationMapperTest` passes and the generated response DTO
-contains the stored value.
+Expected: both tests pass, and the HTTP endpoint response contains the stored
+prompt under `agent.additionalPrompt`.
 
 - [ ] **Step 5: Review and commit the service change**
 
@@ -106,7 +116,7 @@ Check `git diff --check`, review the diff to confirm the public response exposes
 only the intended optional prompt field, then commit the service change:
 
 ```bash
-git add src/main/openapi/onecx-ai-v1.yaml src/main/java/org/tkit/onecx/ai/provider/rs/external/v1/mappers/AgentConfigurationMapper.java src/test/java/org/tkit/onecx/ai/provider/rs/external/v1/mappers/AgentConfigurationMapperTest.java
+git add src/main/openapi/onecx-ai-v1.yaml src/main/java/org/tkit/onecx/ai/provider/rs/external/v1/mappers/AgentConfigurationMapper.java src/test/java/org/tkit/onecx/ai/provider/rs/external/v1/mappers/AgentConfigurationMapperTest.java src/test/java/org/tkit/onecx/ai/provider/rs/external/v1/controllers/AgentRestV1ControllerTest.java
 git commit -m "feat: expose agent additional prompt in configuration"
 ```
 
