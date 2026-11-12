@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
 
 from onecx_pipecat.config import Settings
 from onecx_pipecat.models import AgentConfigSnapshot
@@ -28,6 +29,48 @@ _NO_API_KEY = "not-needed"
 
 class LlmConfigError(Exception):
     """Raised when the pinned provider/model cannot be turned into an LLM service."""
+
+
+@dataclass(frozen=True)
+class OpenAIModelOptions:
+    """OpenAI-specific transport and provider-dependent reasoning settings."""
+
+    api: Literal["chat-completions", "responses"] = "chat-completions"
+    reasoning_effort: str | None = None
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in data:
+            raise LlmConfigError(f"model configuration has duplicate key {key!r}")
+        data[key] = value
+    return data
+
+
+def parse_openai_model_options(raw: str) -> OpenAIModelOptions:
+    """Parse OpenAI options, enforcing the runtime's 255-character config limit."""
+    if len(raw) > 255:
+        raise LlmConfigError("OpenAI model configuration exceeds 255 characters")
+    if not raw.strip():
+        return OpenAIModelOptions()
+    try:
+        data = json.loads(raw, object_pairs_hook=_unique_json_object)
+    except ValueError as exc:
+        raise LlmConfigError("model configuration is not valid JSON") from exc
+    if not isinstance(data, dict):
+        raise LlmConfigError("model configuration must be a JSON object")
+    api = data.get("api", "chat-completions")
+    if not isinstance(api, str):
+        raise LlmConfigError("model configuration 'api' must be a string")
+    if not api.strip():
+        api = "chat-completions"
+    if api not in ("chat-completions", "responses"):
+        raise LlmConfigError(f"unsupported OpenAI API: {api!r}")
+    effort = data.get("reasoningEffort", "")
+    if not isinstance(effort, str):
+        raise LlmConfigError("model configuration 'reasoningEffort' must be a string")
+    return OpenAIModelOptions(api=api, reasoning_effort=effort.strip() or None)
 
 
 def parse_model_params(raw: str) -> dict[str, Any]:
@@ -76,11 +119,43 @@ def build_llm(
     if ptype == "OPENAI":
         from pipecat.services.openai.llm import OpenAILLMService
 
+        options = parse_openai_model_options(model.model_params)
         if api_key is None and not provider.llm_url:
             raise LlmConfigError("OPENAI provider requires an API key credential")
         kwargs: dict[str, Any] = {"api_key": api_key or _NO_API_KEY}
         if provider.llm_url:
             kwargs["base_url"] = provider.llm_url
+        if options.api == "responses":
+            from pipecat.services.openai.responses.llm import (
+                OpenAIResponsesHttpLLMService,
+                OpenAIResponsesReasoningConfig,
+            )
+
+            class _ProviderDefaultResponsesHttpLLMService(OpenAIResponsesHttpLLMService):
+                def _build_response_params(self, invocation_params: dict[str, Any]) -> dict:
+                    request = super()._build_response_params(invocation_params)
+                    reasoning = self._settings.reasoning
+                    # Pipecat 1.8.1 disables reasoning when unset; retain provider defaults.
+                    if reasoning is None or not reasoning.model_dump(exclude_none=True):
+                        request.pop("reasoning", None)
+                    elif reasoning.effort == "none":
+                        request.pop("include", None)
+                    return request
+
+            if "max_tokens" in params:
+                params["max_completion_tokens"] = params.pop("max_tokens")
+            if options.reasoning_effort is not None:
+                params["reasoning"] = OpenAIResponsesReasoningConfig(
+                    effort=options.reasoning_effort
+                )
+            return _ProviderDefaultResponsesHttpLLMService(
+                settings=OpenAIResponsesHttpLLMService.Settings(
+                    model=model.model_identifier, **params
+                ),
+                **kwargs,
+            )
+        if options.reasoning_effort is not None:
+            params["extra"] = {"reasoning_effort": options.reasoning_effort}
         return OpenAILLMService(
             settings=OpenAILLMService.Settings(model=model.model_identifier, **params), **kwargs
         )

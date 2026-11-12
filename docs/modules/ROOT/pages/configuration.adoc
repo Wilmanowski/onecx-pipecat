@@ -218,9 +218,34 @@ configuration without a supported `provider.type` or with a blank
 overrides the API base URL.
 |===
 
-`authMode=OAUTH` is not supported. `model.modelConfig` (a JSON object string)
-maps to service settings for `temperature`, `max_tokens`/`maxTokens` and
-`top_p`/`topP`; other keys are ignored and invalid JSON fails the start.
+`authMode=OAUTH` is not supported. `model.modelConfig` is a JSON object string.
+For every provider, `temperature`, `max_tokens`/`maxTokens`, and
+`top_p`/`topP` map to service settings; `max_tokens` is converted to an integer,
+and `temperature` and `top_p` to floats. `null` values are ignored, and other
+keys are ignored. Invalid JSON, a non-object value, or a non-numeric value
+(including a boolean) for one of these settings rejects the session start. No
+sampling defaults are added when these settings are omitted. These numeric
+settings continue to apply to non-OpenAI providers as before.
+
+For OpenAI, `api` selects the transport: it defaults to `chat-completions`
+(`OpenAILLMService`), or can be set to `responses` to use Pipecat's HTTP
+Responses service. The Responses service sends `store: false` and maps
+`max_tokens` to the Responses API's `max_output_tokens`. It does not silently
+fall back to chat completions if Responses is unsupported or fails. OpenAI
+`modelConfig` is limited to 255 characters; malformed JSON, duplicate keys,
+non-object JSON, a non-string `api`, or an unsupported API value rejects
+session start. A missing, blank, or whitespace-only `api` selects
+`chat-completions`.
+
+OpenAI's optional `reasoningEffort` must be a string; it is trimmed and a blank
+value is treated as unset. The accepted effort values depend on the selected
+provider and model and are not enumerated here. For example, a GPT Luna model
+using tools with medium reasoning can set:
+
+[source,json]
+----
+{"api":"responses","reasoningEffort":"medium"}
+----
 
 Scaffold skills (entries with a name and instruction) are advertised in the
 system prompt and exposed through the `activate_skill(name)` function.
