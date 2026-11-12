@@ -110,8 +110,8 @@ git add src/main/openapi/onecx-ai-v1.yaml src/main/java/org/tkit/onecx/ai/provid
 git commit -m "feat: expose agent additional prompt in configuration"
 ```
 
-Open the ai-provider service PR before starting the Pipecat PR; record its URL
-for the Pipecat PR description.
+After the Task 1 review gate approves this change, open the ai-provider service
+PR before starting Task 2; record its URL for the Pipecat PR description.
 
 ## Task 2: Consume and compose the additional prompt in Pipecat
 
@@ -238,8 +238,8 @@ git add onecx_pipecat/models.py onecx_pipecat/adapters/agent_config.py onecx_pip
 git commit -m "feat: use agent additional prompt in voice sessions"
 ```
 
-Open the Pipecat PR with the service PR as a dependency and describe the
-prompt-block ordering.
+After the final review gate approves this change, open the Pipecat PR with the
+service PR as a dependency and describe the prompt-block ordering.
 
 ## Final verification and PR sequencing
 
