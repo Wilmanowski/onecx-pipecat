@@ -112,7 +112,9 @@ class HttpAgentConfigAdapter:
                 raise AgentConfigError(f"configuration belongs to another agent, not {agent_id}")
             version_id = _configuration_version(response, agent_id)
             if agent_config_version is not None and version_id != agent_config_version:
-                raise AgentConfigError("configuration version does not match the requested reference")
+                raise AgentConfigError(
+                    "configuration version does not match the requested reference"
+                )
             snapshot.agent_config_version = version_id
             return snapshot
         finally:

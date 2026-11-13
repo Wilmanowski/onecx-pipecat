@@ -94,7 +94,10 @@ async def test_version_is_pinned_in_ready_entries_and_structured_logs(reference,
                     agent_config_version="must-be-overridden",
                 )
             )
-    assert [entry.agent_config_version for entry in container.persistence.entries] == [pinned, pinned]
+    assert [entry.agent_config_version for entry in container.persistence.entries] == [
+        pinned,
+        pinned,
+    ]
     assert [record.agent_config_version for record in caplog.records] == [pinned] * 3
     assert all(record.session_id == "sess-1" for record in caplog.records)
     assert all(record.agent_id == "onecx-agent" for record in caplog.records)

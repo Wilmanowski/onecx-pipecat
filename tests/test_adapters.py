@@ -470,7 +470,9 @@ async def test_agent_config_pins_exact_version_with_service_and_user_auth():
     snap = await adapter.pin("local", "agent-1", "tok", "old/version?")
     assert snap.agent_config_version == "old/version?"
     assert len(seen) == 1
-    assert seen[0].url.raw_path == b"/internal/agents/agent-1/configuration/versions/old%2Fversion%3F"
+    assert (
+        seen[0].url.raw_path == b"/internal/agents/agent-1/configuration/versions/old%2Fversion%3F"
+    )
     assert seen[0].headers["apm-principal-token"] == "tok"
     assert seen[0].headers["Authorization"] == "Bearer svc"
 
